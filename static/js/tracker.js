@@ -642,7 +642,7 @@ async function runCVLoop() {
         const faces = await detector.estimateFaces(video);
         if (faces.length === 0) {
             if (!cvNoFaceStartTime) cvNoFaceStartTime = Date.now();
-            if (Date.now() - cvNoFaceStartTime > 3000) { // 3 seconds away
+            if (Date.now() - cvNoFaceStartTime > 1000) { // 1 second away
                 triggerCVAlert('no_face');
                 cvNoFaceStartTime = null;
             }
@@ -657,12 +657,12 @@ async function runCVLoop() {
         }
     } catch (e) { console.error("CV Loop Error:", e); }
     
-    if (cvEnabled) setTimeout(runCVLoop, 1000);
+    if (cvEnabled) setTimeout(runCVLoop, 500); // Check twice per second
 }
 
 function triggerCVAlert(type) {
     const now = Date.now();
-    if (now - cvLastAlertTime < 5000) return; // limit alerts
+    if (now - cvLastAlertTime < 2000) return; // Alert every 2 seconds if distraction continues
     cvLastAlertTime = now;
     
     playDogBark();
