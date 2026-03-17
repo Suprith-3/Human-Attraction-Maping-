@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>FocusOS Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#00ff88">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="theme-neon">
+    <div id="connection-pill" class="status-pill">● Online</div>
+
+    <div id="flash-overlay"></div>
+
+    <div id="adaptive-lock-overlay">
+        <h1>🛡️ FOCUS LOCK</h1>
+        <p>You exceeded 3 tab shifts in 2 minutes.</p>
+        <p>Locked for <span id="adaptive-countdown">30</span> seconds.</p>
+    </div>
+
+    <div id="focus-lock-overlay">
+        <h1>🔒 Focus Lock Active</h1>
+        <p>Return to: <span id="lock-target-name"></span></p>
+        <div id="lock-countdown">Overriding in 5...</div>
+        <button onclick="overrideFocusLock()" id="override-btn" style="display:none;" class="btn-primary">Override (costs 10 coins)</button>
+    </div>
+
+    <div class="navbar">
+        <div class="logo"><i class="fa-solid fa-bullseye"></i> FocusOS</div>
+        <div class="navbar-right">
+            <button id="btn-start-session" class="btn-primary" onclick="handleStartSession()" style="background: #27ae60; color: white;">Start Session</button>
+            <button id="btn-end-session" class="btn-primary" onclick="handleEndSession()" style="display:none; background: #c0392b; color: white;">End Session</button>
+            <span style="margin-left: 20px;">Hello, {{ user.name }}</span>
+            <a href="/api/auth/logout" class="btn-primary" style="text-decoration:none; color:#000; margin-left: 10px;">Logout</a>
+        </div>
+    </div>
+
+    <div class="stats-bar">
+        <div class="stat-item">⌨️ <span id="stat-keys">0</span></div>
+        <div class="stat-item">🖱️ <span id="stat-clicks">0</span></div>
+        <div class="stat-item">⚡ <span id="stat-actions">0</span></div>
+        <div class="stat-item">🔀 <span id="stat-tabs">0</span></div>
+        <div class="stat-item">🗺️ <span id="stat-path-cm">0.0</span>cm</div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <button class="tab-btn active" onclick="switchTab('overview')">Overview</button>
+            <button class="tab-btn" onclick="switchTab('gravity')">Gravity</button>
+            <button class="tab-btn" onclick="switchTab('engage')">Engage</button>
+            <button class="tab-btn" onclick="switchTab('analytics')">Analytics</button>
+            <button class="tab-btn" onclick="switchTab('history')">History</button>
+            <button class="tab-btn" onclick="switchTab('rewards')">Rewards</button>
+            <button class="tab-btn" onclick="switchTab('controls')">Controls</button>
+        </div>
+
+        <div class="content-area">
+            <!-- OVERVIEW TAB -->
+            <div id="overview-tab" class="tab-section active">
+                <h2>Real-time Pulse</h2>
+                <div class="grid-2">
+                    <div class="card"><canvas id="keystrokeChart"></canvas></div>
+                    <div class="card"><canvas id="clickBarChart"></canvas></div>
+                </div>
+                <div class="grid-2">
+                    <div class="card"><canvas id="tabShiftLineChart"></canvas></div>
+                    <div class="card"><canvas id="actionAreaChart"></canvas></div>
+                </div>
+                <div class="card" style="width: 50%;"><canvas id="mousePathChart"></canvas></div>
+            </div>
+
+            <!-- GRAVITY TAB -->
+            <div id="gravity-tab" class="tab-section">
+                <h2>Attention Gravity Map</h2>
+                <div class="card">
+                    <canvas id="gravityCanvas" width="800" height="600" style="background:#000; display:block; margin:auto;"></canvas>
+                </div>
+            </div>
+
+            <!-- ENGAGE TAB -->
+            <div id="engage-tab" class="tab-section">
+                <h2>Engagement Session</h2>
+                <div class="card">
+                    <div class="form-group">
+                        <label>Target Website/App</label>
+                        <input type="text" id="engage-target" placeholder="e.g. VS Code, youtube.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Focus Duration (minutes)</label>
+                        <input type="number" id="engage-duration" value="25" min="1">
+                    </div>
+                    <button class="btn-primary" onclick="initEngagement()">▶ Start Engagement Session</button>
+                    
+                    <div id="engage-status" style="display:none; margin-top: 20px;">
+                        <h3>🎯 Focused on: <span id="engage-active-target"></span></h3>
+                        <div class="timer-large" id="engage-timer">25:00</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ANALYTICS TAB -->
+            <div id="analytics-tab" class="tab-section">
+                <h2>Visual Analytics</h2>
+                <div class="grid-2">
+                    <div class="card">
+                        <h3>Movement Heatmap</h3>
+                        <canvas id="heatmapCanvas" width="400" height="300" style="background:#000; width:100%;"></canvas>
+                        <button class="btn-primary" style="margin-top:10px;" onclick="refreshHeatmap()">Refresh</button>
+                    </div>
+                    <div class="card">
+                        <h3>Intensity Bars</h3>
+                        <canvas id="intensityCanvas"></canvas>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="card">
+                        <h3>Distribution Wheel</h3>
+                        <canvas id="distributionCanvas"></canvas>
+                    </div>
+                    <div class="card">
+                        <h3>Attention Flow Map</h3>
+                        <svg id="flowSvg" width="100%" height="300" style="background:#111; border-radius:8px;"></svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- HISTORY TAB -->
+            <div id="history-tab" class="tab-section">
+                <h2>Session History</h2>
+                <div class="card">
+                    <table id="history-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Keys</th>
+                                <th>Clicks</th>
+                                <th>Shifts</th>
+                                <th>Path (cm)</th>
+                                <th>Score</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- REWARDS TAB -->
+            <div id="rewards-tab" class="tab-section">
+                <h2>Focus Rewards</h2>
+                <div class="grid-2">
+                    <div class="card">
+                        <h3>Wallet</h3>
+                        <div style="font-size: 32px; color: gold;">🪙 <span id="wallet-coins">0</span> coins</div>
+                        <p id="streak-display">🔥 Streak: 0 Days</p>
+                    </div>
+                    <div class="card">
+                        <h3>Themes Store</h3>
+                        <button class="btn-primary" style="margin:5px;" onclick="unlockTheme('neon', 200)">Neon Theme (200c)</button>
+                        <button class="btn-primary" style="margin:5px;" onclick="unlockTheme('ocean', 150)">Ocean Theme (150c)</button>
+                        <button class="btn-primary" style="margin:5px;" onclick="unlockTheme('sunset', 100)">Sunset Theme (100c)</button>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 20px; border-left: 5px solid gold;">
+                    <h3>📜 How to Earn Coins</h3>
+                    <ul style="line-height: 1.8; color: var(--text-muted);">
+                        <li><b style="color: var(--accent);">Focus Sessions:</b> Earn <b style="color: gold;">50 coins</b> for every successfully completed session.</li>
+                        <li><b style="color: var(--accent);">Engagement Sessions:</b> Earn <b style="color: gold;">75 coins</b> for completing an Engagement Target.</li>
+                        <li><b style="color: var(--accent);">Daily Streaks:</b> Maintain your streak! Higher streaks multiply your session rewards.</li>
+                        <li><b style="color: var(--accent);">Perfect Focus:</b> Sessions with 0 tab shifts and 0 CV alerts grant a <b style="color: gold;">2x bonus</b>.</li>
+                        <li><b style="color: var(--accent);">Badges:</b> Unlocking a new badge grants a one-time <b style="color: gold;">100 coin</b> bonus!</li>
+                    </ul>
+                </div>
+                <h3>Badges</h3>
+                <div class="card badge-gallery" id="badge-container">
+                    <!-- Badges populated by JS -->
+                </div>
+            </div>
+
+            <!-- CONTROLS TAB -->
+            <div id="controls-tab" class="tab-section">
+                <h2>System Controls</h2>
+                <div class="card">
+                    <div class="form-group" style="display:flex; align-items:center; gap:20px; font-size:18px;">
+                        <label style="margin:0; flex:1;">👁️ Camera Attention Detection</label>
+                        <input type="checkbox" id="toggle-cv" style="width:24px; height:24px;" onchange="toggleCV(this.checked)">
+                    </div>
+                    <hr style="border-color:var(--border);">
+                    <div class="form-group" style="display:flex; align-items:center; gap:20px; font-size:18px;">
+                        <label style="margin:0; flex:1;">🛡️ Adaptive Blocking</label>
+                        <input type="checkbox" id="toggle-adaptive" style="width:24px; height:24px;" onchange="toggleAdaptive(this.checked)">
+                        <span id="adaptive-shifts-text" style="font-size:14px; color:var(--text-muted);">Shifts: 0/3</span>
+                    </div>
+                    <hr style="border-color:var(--border);">
+                    <div class="form-group">
+                        <label style="font-size:18px;">🔒 Target Focus Lock</label>
+                        <div style="display:flex; gap:10px; margin-top:10px;">
+                            <input type="text" id="focus-lock-target" placeholder="App/URL to lock" style="flex:1;">
+                            <button class="btn-primary" id="btn-focus-lock" onclick="toggleFocusLock()">Activate Lock</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Modals inserted via JS -->
+    
+    <script src="/static/js/tracker.js"></script>
+    <script src="/static/js/charts.js"></script>
+    <script src="/static/js/heatmap.js"></script>
+    <script src="/static/js/rewards.js"></script>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js');
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-section').forEach(node => {
+                node.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-btn').forEach(node => {
+                node.classList.remove('active');
+            });
+            document.getElementById(tabId + '-tab').classList.add('active');
+            event.target.classList.add('active');
+            
+            if (tabId === 'history') loadHistory();
+        }
+
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/stats/history');
+                const data = await res.json();
+                const tbody = document.querySelector('#history-table tbody');
+                tbody.innerHTML = '';
+                data.forEach(s => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${new Date(s.start_time).toLocaleString()}</td>
+                        <td>${s.keystrokes}</td>
+                        <td>${s.clicks}</td>
+                        <td>${s.tab_shifts}</td>
+                        <td>${s.mouse_cm.toFixed(1)}</td>
+                        <td>${s.focus_score.toFixed(1)}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                console.error("Offline: Cannot load history");
+            }
+        }
+    </script>
+</body>
+</html>
