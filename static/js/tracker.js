@@ -169,7 +169,11 @@ async function handleEndSession() {
         showPopup("✅ Session Saved Successfully!");
         
         // Claim rewards for the session
-        await fetch('/api/rewards/claim', { method: 'POST' });
+        await fetch('/api/rewards/claim', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ reward_type: 'session_complete' })
+        });
         if (typeof initRewards === 'function') initRewards();
 
         if (typeof loadHistory === 'function') loadHistory();
@@ -601,23 +605,88 @@ function overrideFocusLock() {
     postTracking('/api/focuslock/event', { target_app: focusLockTarget, overridden: 1 });
 }
 
-// --- CV Attention Detection ---
-function toggleCV(checked) {
-    cvEnabled = checked;
-    postTracking('/api/cv/toggle', {enabled: checked});
+// --- CV Attention Detection (Client-Side) ---
+let faceDetector = null;
+let cameraStream = null;
+let cvLastAlertTime = 0;
+let cvNoFaceStartTime = null;
+
+async function initFaceDetector() {
+    if (faceDetector) return faceDetector;
+    const model = face_detection.SupportedModels.MediaPipeFaceDetection;
+    const detectorConfig = { runtime: 'tfjs' };
+    faceDetector = await face_detection.createDetector(model, detectorConfig);
+    return faceDetector;
 }
 
-setInterval(async () => {
-    if (!cvEnabled || !navigator.onLine) return;
+async function startCamera() {
+    const video = document.getElementById('cv-video');
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = cameraStream;
+    return new Promise(resolve => video.onloadedmetadata = () => resolve(video));
+}
+
+function stopCamera() {
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+    }
+}
+
+async function runCVLoop() {
+    if (!cvEnabled) return;
+    const video = document.getElementById('cv-video');
+    const detector = await initFaceDetector();
+    
     try {
-        const res = await fetch('/api/cv/alerts/poll');
-        const data = await res.json();
-        data.alerts.forEach(alert => {
-            playDogBark();
-            flashScreen();
-            showPopup(alert.type === 'no_face'
-                ? '👁️ You look away! Please refocus.'
-                : '😴 Head bend detected! Stay alert.');
-        });
-    } catch(e) {}
-}, 500);
+        const faces = await detector.estimateFaces(video);
+        if (faces.length === 0) {
+            if (!cvNoFaceStartTime) cvNoFaceStartTime = Date.now();
+            if (Date.now() - cvNoFaceStartTime > 3000) { // 3 seconds away
+                triggerCVAlert('no_face');
+                cvNoFaceStartTime = null;
+            }
+        } else {
+            cvNoFaceStartTime = null;
+            const face = faces[0];
+            const box = face.box;
+            // Head bend detection (ratio check)
+            if (box.height > box.width * 1.4) {
+                triggerCVAlert('head_bend');
+            }
+        }
+    } catch (e) { console.error("CV Loop Error:", e); }
+    
+    if (cvEnabled) setTimeout(runCVLoop, 1000);
+}
+
+function triggerCVAlert(type) {
+    const now = Date.now();
+    if (now - cvLastAlertTime < 5000) return; // limit alerts
+    cvLastAlertTime = now;
+    
+    playDogBark();
+    flashScreen();
+    showPopup(type === 'no_face' 
+        ? '👁️ You look away! Please refocus.' 
+        : '😴 Head bend detected! Stay alert.');
+    
+    postTracking('/api/cv/alert/log', { type: type });
+}
+
+async function toggleCV(checked) {
+    cvEnabled = checked;
+    if (checked) {
+        try {
+            await startCamera();
+            runCVLoop();
+            showPopup("📸 Camera monitoring active!");
+        } catch (e) {
+            alert("Could not access camera. Please check permissions.");
+            document.getElementById('toggle-cv').checked = false;
+            cvEnabled = false;
+        }
+    } else {
+        stopCamera();
+    }
+}

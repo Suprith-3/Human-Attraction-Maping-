@@ -3,7 +3,6 @@ from functools import wraps
 import bcrypt
 import time
 from database import get_db, init_db, log_cv_alert
-from cv_module import AttentionDetector
 
 app = Flask(__name__)
 app.secret_key = 'super_secret_offline_key'
@@ -11,12 +10,7 @@ app.secret_key = 'super_secret_offline_key'
 # Initialize DB
 init_db()
 
-detector = AttentionDetector()
-cv_alert_queue = []
-
-def on_alert(user_id, alert_type):
-    log_cv_alert(user_id, alert_type)
-    cv_alert_queue.append({'type': alert_type, 'time': time.time()})
+# Client-side CV alerts are logged via /api/cv/alert/log
 
 def login_required(f):
     @wraps(f)
@@ -310,23 +304,14 @@ def api_stats_flow():
         'return_end': 8
     })
 
-@app.route('/api/cv/toggle', methods=['POST'])
+@app.route('/api/cv/alert/log', methods=['POST'])
 @login_required
-def toggle_cv():
+def api_cv_alert_log():
+    user_id = session['user_id']
     data = request.json
-    if data['enabled']:
-        detector.start(session['user_id'], on_alert)
-    else:
-        detector.stop()
+    alert_type = data.get('type', 'no_face')
+    log_cv_alert(user_id, alert_type)
     return jsonify({'status': 'ok'})
-
-@app.route('/api/cv/alerts/poll')
-@login_required
-def poll_alerts():
-    global cv_alert_queue
-    alerts = cv_alert_queue.copy()
-    cv_alert_queue.clear()
-    return jsonify({'alerts': alerts})
 
 @app.route('/api/blocking/event', methods=['POST'])
 @login_required
@@ -371,8 +356,8 @@ def api_rewards():
 @login_required
 def api_rewards_claim():
     user_id = session['user_id']
-    data = request.json
-    reward_type = data.get('reward_type')
+    data = request.get_json(silent=True) or {}
+    reward_type = data.get('reward_type', 'session_complete')
     conn = get_db()
     conn.execute("INSERT INTO rewards (user_id, reward_type) VALUES (?, ?)", (user_id, reward_type))
     conn.execute("UPDATE user_stats SET total_coins = total_coins + 50 WHERE user_id = ?", (user_id,))
