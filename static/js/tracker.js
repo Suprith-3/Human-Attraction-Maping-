@@ -613,20 +613,31 @@ let cvNoFaceStartTime = null;
 
 async function initFaceDetector() {
     if (faceDetector) return faceDetector;
+    console.log("🧠 Loading AI Face Detector Model...");
     const model = face_detection.SupportedModels.MediaPipeFaceDetection;
     const detectorConfig = { runtime: 'tfjs' };
     faceDetector = await face_detection.createDetector(model, detectorConfig);
+    console.log("✅ AI Face Detector Ready.");
     return faceDetector;
 }
 
 async function startCamera() {
+    console.log("📷 Starting camera...");
     const video = document.getElementById('cv-video');
-    cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
-    video.srcObject = cameraStream;
-    return new Promise(resolve => video.onloadedmetadata = () => resolve(video));
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = cameraStream;
+        await video.play();
+        console.log("✅ Camera playing.");
+        return new Promise(resolve => video.onloadedmetadata = () => resolve(video));
+    } catch (e) {
+        console.error("❌ Camera Error:", e);
+        throw e;
+    }
 }
 
 function stopCamera() {
+    console.log("🛑 Stopping camera.");
     if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
         cameraStream = null;
@@ -636,28 +647,41 @@ function stopCamera() {
 async function runCVLoop() {
     if (!cvEnabled) return;
     const video = document.getElementById('cv-video');
-    const detector = await initFaceDetector();
     
     try {
+        const detector = await initFaceDetector();
         const faces = await detector.estimateFaces(video);
+        
         if (faces.length === 0) {
+            console.log("🔍 [CV] No face detected.");
             if (!cvNoFaceStartTime) cvNoFaceStartTime = Date.now();
-            if (Date.now() - cvNoFaceStartTime > 1000) { // 1 second away
+            const elapsed = Date.now() - cvNoFaceStartTime;
+            if (elapsed > 1000) { 
+                console.warn("⚠️ [CV] Triggering NO_FACE alert.");
                 triggerCVAlert('no_face');
                 cvNoFaceStartTime = null;
             }
         } else {
+            console.log(`🔍 [CV] ${faces.length} face(s) found.`);
             cvNoFaceStartTime = null;
             const face = faces[0];
             const box = face.box;
-            // Head bend detection (ratio check)
-            if (box.height > box.width * 1.4) {
+            const ratio = box.height / box.width;
+            
+            // Log ratio for debugging head bend
+            if (ratio > 1.3) {
+                console.warn(`⚠️ [CV] High Face Ratio: ${ratio.toFixed(2)} - possible head bend.`);
+            }
+
+            if (ratio > 1.5) { 
                 triggerCVAlert('head_bend');
             }
         }
-    } catch (e) { console.error("CV Loop Error:", e); }
+    } catch (e) { 
+        console.error("❌ [CV Loop Error]:", e); 
+    }
     
-    if (cvEnabled) setTimeout(runCVLoop, 500); // Check twice per second
+    if (cvEnabled) setTimeout(runCVLoop, 500); 
 }
 
 function triggerCVAlert(type) {
