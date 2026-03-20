@@ -423,13 +423,16 @@ function flashScreen() {
     const overlay = document.getElementById('flash-overlay');
     if (!overlay) return;
     let count = 0;
-    const colors = ['rgba(255,0,0,0.3)', 'rgba(0,255,0,0.3)'];
+    // Faster flickering: 100ms intervals, red and neon green
     const interval = setInterval(() => {
-        overlay.style.background = colors[count % 2];
+        overlay.style.background = (count % 2 === 0) ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 255, 136, 0.4)';
         overlay.style.display = 'block';
         count++;
-        if (count >= 6) { clearInterval(interval); overlay.style.display = 'none'; }
-    }, 500);
+        if (count >= 12) { // 1.2 seconds of flicker
+            clearInterval(interval);
+            overlay.style.display = 'none';
+        }
+    }, 100);
 }
 
 function showPopup(msg) {
@@ -611,27 +614,61 @@ let cameraStream = null;
 let cvLastAlertTime = 0;
 let cvNoFaceStartTime = null;
 
-async function initFaceDetector() {
-    if (faceDetector) return faceDetector;
-    console.log("🧠 Loading AI Face Detector Model...");
-    const model = face_detection.SupportedModels.MediaPipeFaceDetection;
-    const detectorConfig = { runtime: 'tfjs' };
-    faceDetector = await face_detection.createDetector(model, detectorConfig);
-    console.log("✅ AI Face Detector Ready.");
-    return faceDetector;
+let objectDetector = null;
+
+async function initVisionModels() {
+    // Face Detector (BlazeFace is incredibly stable)
+    if (!faceDetector) {
+        try {
+            console.log("🧠 [CV] Loading Face Detector (BlazeFace)...");
+            if (!window.blazeface) throw new Error("BlazeFace library not loaded yet.");
+            faceDetector = await blazeface.load();
+            console.log("✅ [CV] Face Detector Ready.");
+        } catch (e) {
+            console.error("❌ [CV] Face Detector Load Error:", e);
+        }
+    }
+    
+    // Object Detector (Heavier, loads in background)
+    if (!objectDetector) {
+        console.log("📱 [CV] Loading Object Detector (Mobile)...");
+        if (window.cocoSsd) {
+            cocoSsd.load().then(model => {
+                objectDetector = model;
+                console.log("✅ [CV] Object Detector Ready.");
+            }).catch(e => {
+                console.error("❌ [CV] Object Detector Load Error:", e);
+            });
+        }
+    }
 }
 
 async function startCamera() {
-    console.log("📷 Starting camera...");
+    console.log("📷 [CV] Initializing Camera...");
     const video = document.getElementById('cv-video');
+    if (!video) {
+        console.error("❌ [CV] Video element #cv-video not found in DOM.");
+        return;
+    }
+    
+    if (cameraStream) return video;
+
     try {
-        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        cameraStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { width: 640, height: 480, frameRate: 15 } 
+        });
         video.srcObject = cameraStream;
-        await video.play();
-        console.log("✅ Camera playing.");
-        return new Promise(resolve => video.onloadedmetadata = () => resolve(video));
+        
+        return new Promise((resolve) => {
+            video.onloadedmetadata = async () => {
+                await video.play();
+                console.log("✅ [CV] Camera playing.");
+                resolve(video);
+            };
+        });
     } catch (e) {
-        console.error("❌ Camera Error:", e);
+        console.error("❌ [CV] Camera Access Error:", e);
+        showPopup("🚫 Camera blocked! Enable permissions to use AI.");
         throw e;
     }
 }
@@ -647,34 +684,83 @@ function stopCamera() {
 async function runCVLoop() {
     if (!cvEnabled) return;
     const video = document.getElementById('cv-video');
+    if (!video || video.paused) {
+        if (cvEnabled) setTimeout(runCVLoop, 1000);
+        return;
+    }
     
     try {
-        const detector = await initFaceDetector();
-        const faces = await detector.estimateFaces(video);
+        if (!faceDetector) {
+            await initVisionModels();
+            if (!faceDetector) {
+                if (cvEnabled) setTimeout(runCVLoop, 1000);
+                return;
+            }
+        }
+
+        // --- Multi-Model Detection ---
         
-        if (faces.length === 0) {
-            console.log("🔍 [CV] No face detected.");
+        // 1. Phone Detection (sub-sampled)
+        if (objectDetector && Math.random() < 0.3) { 
+            const predictions = await objectDetector.detect(video);
+            const holdingPhone = predictions.some(p => p.class === 'cell phone' && p.score > 0.5);
+            if (holdingPhone) {
+                console.warn("⚠️ [CV] PHONE ALERT!");
+                triggerCVAlert('phone');
+                if (cvEnabled) setTimeout(runCVLoop, 800);
+                return;
+            }
+        }
+
+        // 2. Face & Eyes check (BlazeFace landmarks)
+        const predictions = await faceDetector.estimateFaces(video, false);
+        
+        if (predictions.length === 0) {
             if (!cvNoFaceStartTime) cvNoFaceStartTime = Date.now();
             const elapsed = Date.now() - cvNoFaceStartTime;
-            if (elapsed > 1000) { 
-                console.warn("⚠️ [CV] Triggering NO_FACE alert.");
+            console.log(`[CV] No user: ${Math.floor(elapsed/1000)}s`);
+            if (elapsed > 2000) { 
                 triggerCVAlert('no_face');
                 cvNoFaceStartTime = null;
             }
         } else {
-            console.log(`🔍 [CV] ${faces.length} face(s) found.`);
-            cvNoFaceStartTime = null;
-            const face = faces[0];
-            const box = face.box;
-            const ratio = box.height / box.width;
+            const face = predictions[0];
+            const landmarks = face.landmarks; // [rightEye, leftEye, nose, mouth, rightEar, leftEar]
             
-            // Log ratio for debugging head bend
-            if (ratio > 1.3) {
-                console.warn(`⚠️ [CV] High Face Ratio: ${ratio.toFixed(2)} - possible head bend.`);
-            }
+            // Check Eyes (0, 1)
+            const rightEye = landmarks[0];
+            const leftEye = landmarks[1];
+            
+            if (!leftEye || !rightEye) {
+                if (!cvNoFaceStartTime) cvNoFaceStartTime = Date.now();
+                if (Date.now() - cvNoFaceStartTime > 2000) {
+                    triggerCVAlert('no_eyes');
+                    cvNoFaceStartTime = null;
+                }
+            } else {
+                cvNoFaceStartTime = null;
 
-            if (ratio > 1.5) { 
-                triggerCVAlert('head_bend');
+                // Turn Check (Ear Dist vs Eye Dist)
+                const rightEar = landmarks[4];
+                const leftEar = landmarks[5];
+                
+                if (leftEar && rightEar) {
+                    const eyeDist = Math.abs(leftEye[0] - rightEye[0]);
+                    const earDist = Math.abs(leftEar[0] - rightEar[0]);
+                    const turnRatio = eyeDist / Math.max(earDist, 1);
+                    if (turnRatio < 0.38) {
+                        console.log(`[CV] Side Profile/Turn: ${turnRatio.toFixed(2)}`);
+                        triggerCVAlert('turning_head');
+                    }
+                }
+
+                // Tilt Check (Bounding Box pitch)
+                const height = face.bottomRight[1] - face.topLeft[1];
+                const width = face.bottomRight[0] - face.topLeft[0];
+                const pitch = height / width;
+                if (pitch > 1.4) { 
+                    triggerCVAlert('head_bend');
+                }
             }
         }
     } catch (e) { 
@@ -691,9 +777,13 @@ function triggerCVAlert(type) {
     
     playDogBark();
     flashScreen();
-    showPopup(type === 'no_face' 
-        ? '👁️ You look away! Please refocus.' 
-        : '😴 Head bend detected! Stay alert.');
+    showPopup(
+        type === 'no_face' ? '👁️ Look at the screen! Stay focused.' :
+        type === 'no_eyes' ? '🚫 Eyes not detected! Stop looking at other things.' :
+        type === 'turning_head' ? '🔄 Focus back here! Stop turning your head.' :
+        type === 'phone' ? '📱 PUT DOWN THE PHONE! Work now.' :
+        '😴 Head bend detected! Stay alert.'
+    );
     
     postTracking('/api/cv/alert/log', { type: type });
 }
@@ -703,10 +793,11 @@ async function toggleCV(checked) {
     if (checked) {
         try {
             await startCamera();
+            initVisionModels(); // Start loading models immediately
             runCVLoop();
-            showPopup("📸 Camera monitoring active!");
+            showPopup("📸 AI Monitor Active. Loading models...");
         } catch (e) {
-            alert("Could not access camera. Please check permissions.");
+            console.error("Failed to enable CV:", e);
             document.getElementById('toggle-cv').checked = false;
             cvEnabled = false;
         }
