@@ -71,4 +71,30 @@ if (savedThemes.length > 0) {
     applyTheme(savedThemes[savedThemes.length - 1]);
 }
 
+async function buyBadge(badgeId, cost) {
+    const elWallet = document.getElementById('wallet-coins');
+    if(!elWallet) return;
+    const currentCoins = parseInt(elWallet.textContent);
+
+    if (currentCoins >= cost) {
+        if(confirm(`Unlock ${badgeId.replace(/_/g, ' ')} for ${cost} coins?`)) {
+            const res = await fetch('/api/rewards/claim', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ reward_type: badgeId })
+            });
+            const data = await res.json();
+            if(data.status === 'ok') {
+                elWallet.textContent = currentCoins - cost;
+                // Subtract coins from local storage just in case of reload
+                // but sync with server is better
+                initRewards();
+                alert('Success! Achievement Unlocked.');
+            }
+        }
+    } else {
+        alert('Not enough coins!');
+    }
+}
+
 setTimeout(initRewards, 1000);

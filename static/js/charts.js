@@ -1,7 +1,9 @@
 const chartOptions = { 
-    animation: { duration: 500 }, 
+    animation: { duration: 200 }, // Faster animations for 1s updates
     responsive: true,
-    scales: { x: { ticks: { color: '#aaa' } }, y: { ticks: { color: '#aaa' } } }
+    maintainAspectRatio: false,
+    elements: { point: { radius: 0 } }, // Hide points to look like a pulse wave
+    scales: { x: { ticks: { color: '#aaa', maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } }, y: { ticks: { color: '#aaa' } } }
 };
 
 let keystrokeChart, clickBarChart, tabShiftLineChart, actionAreaChart, mousePathChart;
@@ -41,8 +43,8 @@ setTimeout(() => {
     });
 }, 500);
 
-setInterval(async () => {
-    if(!navigator.onLine || !keystrokeChart) return;
+async function refreshRealtimeCharts() {
+    if(!navigator.onLine || !keystrokeChart || !window.sessionId) return;
     try {
         const res = await fetch('/api/stats/realtime');
         const data = await res.json();
@@ -66,5 +68,21 @@ setInterval(async () => {
         mousePathChart.data.labels = data.labels;
         mousePathChart.data.datasets[0].data = data.mouse_cm;
         mousePathChart.update();
+
+        // Visual pulse sync
+        const dot = document.querySelector('.pulse-indicator .dot');
+        if (dot) {
+            dot.style.animation = 'none';
+            dot.offsetHeight; // trigger reflow
+            dot.style.animation = 'heart-pulse 0.8s ease-in-out';
+            setTimeout(() => {
+                if(window.sessionId) dot.style.animation = 'heart-pulse 1.2s infinite ease-in-out';
+            }, 800);
+        }
     } catch(e) {}
-}, 5000);
+}
+
+setInterval(refreshRealtimeCharts, 1000); // 1-second refresh
+
+// Global exposure for tracker.js
+window.refreshRealtimeCharts = refreshRealtimeCharts;

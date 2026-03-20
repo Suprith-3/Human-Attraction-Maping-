@@ -1,4 +1,4 @@
-let sessionId = null;
+var sessionId = null;
 
 // Batch counters (reset after every sync)
 let pendingKeys = 0;
@@ -120,8 +120,22 @@ async function handleStartSession() {
         // Update UI buttons
         document.getElementById('btn-start-session').style.display = 'none';
         document.getElementById('btn-end-session').style.display = 'inline-block';
-        updateLiveBar();
         
+        // Show Real-time Pulse Indicator
+        const pulseIndicator = document.getElementById('pulse-indicator');
+        if (pulseIndicator) pulseIndicator.style.display = 'flex';
+
+        // Auto-enable CV if possible
+        const cvToggle = document.getElementById('toggle-cv');
+        if (cvToggle) {
+            cvToggle.checked = true;
+            toggleCV(true);
+        }
+
+        updateLiveBar();
+        if (typeof window.refreshRealtimeCharts === 'function') {
+            window.refreshRealtimeCharts();
+        }
         showPopup("🚀 Focus Session Started!");
     } catch (e) {
         console.error("Failed to start session:", e);
@@ -162,6 +176,17 @@ async function handleEndSession() {
         
         sessionId = null;
         
+        // Hide Real-time Pulse Indicator
+        const pulseIndicator = document.getElementById('pulse-indicator');
+        if (pulseIndicator) pulseIndicator.style.display = 'none';
+
+        // Auto-disable CV
+        const cvToggle = document.getElementById('toggle-cv');
+        if (cvToggle) {
+            cvToggle.checked = false;
+            toggleCV(false);
+        }
+
         // Update UI buttons
         document.getElementById('btn-start-session').style.display = 'inline-block';
         document.getElementById('btn-end-session').style.display = 'none';
@@ -313,28 +338,40 @@ function renderGravityMap() {
 }
 renderGravityMap();
 
-// Batch sending
+// --- Batch Data Sync ---
+// 1s High-Freq Loop (for REAL-TIME PULSE graphs)
 setInterval(() => {
     if(!sessionId) return;
-    postTracking('/api/track/keys', { count: pendingKeys, session_id: sessionId });
-    postTracking('/api/track/mouse', { clicks: pendingClicks, actions: pendingActions, session_id: sessionId });
-    postTracking('/api/track/tabs', { shift_count: pendingTabs, session_id: sessionId });
-    postTracking('/api/track/path', { total_pixels: pendingPixels, total_cm: parseFloat((pendingPixels * 0.026458).toFixed(1)), session_id: sessionId });
+    
+    if (pendingKeys > 0) {
+        postTracking('/api/track/keys', { count: pendingKeys, session_id: sessionId });
+        pendingKeys = 0; // RESET immediately
+    }
+    if (pendingClicks > 0 || pendingActions > 0) {
+        postTracking('/api/track/mouse', { clicks: pendingClicks, actions: pendingActions, session_id: sessionId });
+        pendingClicks = 0; pendingActions = 0; // RESET immediately
+    }
+    if (pendingTabs > 0) {
+        postTracking('/api/track/tabs', { shift_count: pendingTabs, session_id: sessionId });
+        pendingTabs = 0; // RESET immediately
+    }
+    if (pendingPixels > 0) {
+        postTracking('/api/track/path', { total_pixels: pendingPixels, total_cm: parseFloat((pendingPixels * 0.026458).toFixed(1)), session_id: sessionId });
+        pendingPixels = 0; // RESET immediately
+        lastX = null; lastY = null;
+    }
+}, 1000);
+
+// 30s Low-Freq Loop (for heavy data: Heatmaps & Gravity)
+setInterval(() => {
+    if(!sessionId) return;
     postTracking('/api/track/gravity', { grid_json: JSON.stringify(pendingGravityGrid), session_id: sessionId });
+    pendingGravityGrid = Array(GRID_ROWS).fill(null).map(() => Array(GRID_COLS).fill(0));
+
     if (mousePoints.length > 0) {
         postTracking('/api/track/heatmap', { points: mousePoints, session_id: sessionId });
         mousePoints = [];
     }
-    
-    // Reset batch counters after sending (UI continues using session totals)
-    pendingKeys = 0;
-    pendingClicks = 0;
-    pendingActions = 0;
-    pendingTabs = 0;
-    pendingPixels = 0;
-    lastX = null;
-    lastY = null;
-    pendingGravityGrid = Array(GRID_ROWS).fill(null).map(() => Array(GRID_COLS).fill(0));
 }, 30000);
 
 // --- Engagement ---

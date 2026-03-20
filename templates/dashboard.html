@@ -59,7 +59,13 @@
         <div class="content-area">
             <!-- OVERVIEW TAB -->
             <div id="overview-tab" class="tab-section active">
-                <h2>Real-time Pulse</h2>
+                <h2 style="display: flex; align-items: center; gap: 12px;">
+                    Real-time Pulse
+                    <span id="pulse-indicator" class="pulse-indicator" style="display: none;">
+                        <span class="dot"></span>
+                        <span class="text">REC</span>
+                    </span>
+                </h2>
                 <div class="grid-2">
                     <div class="card"><canvas id="keystrokeChart"></canvas></div>
                     <div class="card"><canvas id="clickBarChart"></canvas></div>
@@ -160,6 +166,25 @@
                         <button class="btn-primary" style="margin:5px;" onclick="unlockTheme('neon', 200)">Neon Theme (200c)</button>
                         <button class="btn-primary" style="margin:5px;" onclick="unlockTheme('ocean', 150)">Ocean Theme (150c)</button>
                         <button class="btn-primary" style="margin:5px;" onclick="unlockTheme('sunset', 100)">Sunset Theme (100c)</button>
+                    </div>
+                </div>
+
+                <div class="grid-2" style="margin-top:20px;">
+                    <div class="card">
+                        <h3>🏆 Achievement Shop</h3>
+                        <p style="color: var(--text-muted); font-size: 13px;">Unlock legendary "Games" for 2000 coins each.</p>
+                        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;">
+                            <button class="btn-primary" onclick="buyBadge('deep_work_master', 2000)">🎓 Deep Work Master (2000c)</button>
+                            <button class="btn-primary" onclick="buyBadge('flow_achiever', 2000)">🌊 Flow Achiever (2000c)</button>
+                            <button class="btn-primary" onclick="buyBadge('switch_slayer', 2000)">⚔️ Switch Slayer (2000c)</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>📜 Rewards Manual</h3>
+                        <ul style="font-size: 13px; line-height: 1.6; color: var(--text-muted);">
+                            <li><b style="color: var(--accent);">Purchase:</b> Bought badges appear in your gallery instantly.</li>
+                            <li><b style="color: var(--accent);">Persistence:</b> All unlocks are saved locally and synced.</li>
+                        </ul>
                     </div>
                 </div>
 

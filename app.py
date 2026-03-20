@@ -209,32 +209,72 @@ def api_track_engagement():
 @app.route('/api/stats/realtime')
 @login_required
 def api_stats_realtime():
-    import random
     from datetime import datetime, timedelta
+    user_id = session['user_id']
+    conn = get_db()
     
-    labels = []
-    keystrokes = []
-    clicks = []
-    actions = []
-    tab_shifts = []
-    mouse_cm = []
+    # 1. Get current active session
+    curr = conn.execute("SELECT id, start_time FROM sessions WHERE user_id = ? AND end_time IS NULL ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
+    if not curr:
+        conn.close()
+        return jsonify({'labels':[], 'keystrokes':[], 'clicks':[], 'actions':[], 'tab_shifts':[], 'mouse_cm':[]})
+
+    session_id = curr['id']
+    start_str = curr['start_time'] # e.g. "2026-03-20 11:17:00"
+    
+    # Standardize start_time for range generation
+    try:
+        # SQLite datetime format is usually YYYY-MM-DD HH:MM:SS
+        start_dt = datetime.strptime(start_str, '%Y-%m-%d %H:%M:%S')
+    except:
+        start_dt = datetime.now() - timedelta(minutes=5)
+
     now = datetime.now()
-    for i in range(60):
-        t = now - timedelta(minutes=59-i)
-        labels.append(t.strftime('%H:%M'))
-        keystrokes.append(random.randint(10, 100))
-        clicks.append(random.randint(0, 20))
-        actions.append(random.randint(10, 150))
-        tab_shifts.append(random.randint(0, 3))
-        mouse_cm.append(random.uniform(0.5, 5.0))
+    
+    # 2. Generate Second-by-Second Bucket Map
+    labels = []
+    data_map = {}
+    
+    # Show last 2 minutes second-by-second for ultra-high resolution
+    resol_start = max(start_dt, now - timedelta(minutes=2))
+    
+    temp_dt = resol_start.replace(microsecond=0)
+    while temp_dt <= now:
+        lbl = temp_dt.strftime('%H:%M:%S')
+        labels.append(lbl)
+        data_map[lbl] = {'k':0, 'c':0, 'a':0, 't':0, 'm':0}
+        temp_dt += timedelta(seconds=1)
+
+    # 3. Pull Real Data from Database for this session (per second)
+    def fill_stat(table, col, map_key):
+        rows = conn.execute(f"SELECT strftime('%H:%M:%S', timestamp, 'localtime') as sec, SUM({col}) as total FROM {table} WHERE session_id = ? GROUP BY sec", (session_id,)).fetchall()
+        for r in rows:
+            if r['sec'] in data_map:
+                data_map[r['sec']][map_key] = r['total']
+
+    try:
+        fill_stat('key_events', 'count', 'k')
+        fill_stat('mouse_events', 'clicks', 'c')
+        rows_a = conn.execute("SELECT strftime('%H:%M:%S', timestamp, 'localtime') as sec, SUM(actions) as total FROM mouse_events WHERE session_id = ? GROUP BY sec", (session_id,)).fetchall()
+        for r in rows_a:
+            if r['sec'] in data_map:
+                data_map[r['sec']]['a'] = r['total']
         
+        fill_stat('tab_events', 'shift_count', 't')
+        fill_stat('mouse_path', 'total_cm', 'm')
+    except Exception as e:
+        print(f"Error fetching stats: {e}")
+    
+    conn.close()
+
+    # 4. Final lists
     return jsonify({
         'labels': labels,
-        'keystrokes': keystrokes,
-        'clicks': clicks,
-        'actions': actions,
-        'tab_shifts': tab_shifts,
-        'mouse_cm': mouse_cm
+        'keystrokes': [data_map[l]['k'] for l in labels],
+        'clicks': [data_map[l]['c'] for l in labels],
+        'actions': [data_map[l]['a'] for l in labels],
+        'tab_shifts': [data_map[l]['t'] for l in labels],
+        'mouse_cm': [round(data_map[l]['m'] or 0, 2) for l in labels]
     })
 
 @app.route('/api/stats/history')
@@ -358,9 +398,25 @@ def api_rewards_claim():
     user_id = session['user_id']
     data = request.get_json(silent=True) or {}
     reward_type = data.get('reward_type', 'session_complete')
+    
+    # Mastery Shop purchases
+    purchase_badges = ['deep_work_master', 'flow_achiever', 'switch_slayer']
+    cost = 2000 if reward_type in purchase_badges else 0
+    earn = 50 if reward_type == 'session_complete' else 0
+
     conn = get_db()
+    if cost > 0:
+        stats = conn.execute("SELECT total_coins FROM user_stats WHERE user_id = ?", (user_id,)).fetchone()
+        if not stats or stats['total_coins'] < cost:
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Insufficient coins'})
+        conn.execute("UPDATE user_stats SET total_coins = total_coins - ? WHERE user_id = ?", (cost, user_id))
+    
     conn.execute("INSERT INTO rewards (user_id, reward_type) VALUES (?, ?)", (user_id, reward_type))
-    conn.execute("UPDATE user_stats SET total_coins = total_coins + 50 WHERE user_id = ?", (user_id,))
+    
+    if earn > 0:
+        conn.execute("UPDATE user_stats SET total_coins = total_coins + ? WHERE user_id = ?", (earn, user_id))
+        
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok'})

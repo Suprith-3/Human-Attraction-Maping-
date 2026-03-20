@@ -166,3 +166,35 @@ tr:hover td { background: var(--bg-secondary); cursor: pointer; }
 #focus-lock-overlay { color: #fff; }
 
 .timer-large { font-size: 48px; font-weight: bold; color: var(--accent); margin-top: 10px; }
+
+/* Pulse Indicator */
+.pulse-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 68, 68, 0.1);
+    padding: 4px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 68, 68, 0.3);
+}
+
+.pulse-indicator .dot {
+    width: 10px;
+    height: 10px;
+    background-color: #ff4444;
+    border-radius: 50%;
+    animation: heart-pulse 1.2s infinite ease-in-out;
+}
+
+.pulse-indicator .text {
+    font-size: 11px;
+    color: #ff5555;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+@keyframes heart-pulse {
+    0% { transform: scale(0.9); opacity: 0.8; box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.6); }
+    50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 10px 4px rgba(255, 68, 68, 0); }
+    100% { transform: scale(0.9); opacity: 0.8; box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
+}
